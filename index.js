@@ -1,3 +1,4 @@
+if (!process.env.NODE_ENV) process.env.NODE_ENV = process.env.SERVER_PORT ? 'production' : 'development';
 const express = require('express');
 const { startDashboard } = require('./dashboard/server');
 const { createBotRuntime } = require('./utils/botRuntime');
