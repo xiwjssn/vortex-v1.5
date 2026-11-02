@@ -28,7 +28,7 @@ A Node.js Messenger bot scaffold with a protected Express dashboard, command mod
 | `ADMIN_DASHBOARD_PASSWORD` | Optional separate password for read-only dashboard admin access; `DASHBOARD_PASSWORD` is the owner login |
 | `BOT_NAME` | Display name; defaults to VORTEX |
 | `PREFIX` | Command prefix; defaults to `*` |
-| `PORT` | Web port; Railway injects this |
+| `SERVER_PORT` | Web port; Bot-Hosting injects this automatically (falls back to `PORT`) |
 | `NODE_ENV` | Use `production` behind HTTPS |
 
 Runtime data is stored in the project's `data/` directory. For persistence on Railway, attach a Volume at the app's `/app/data` directory. No environment variable is needed to set file paths.
@@ -40,7 +40,7 @@ Commands live in `cmds/` and export `name`, `aliases`, `description`, `execute(a
 
 ## Railway
 1. Create a new Railway project from this repository.
-2. The Dashboard defaults to password `vortex110`; set `DASHBOARD_PASSWORD` in Railway Variables to override it before public use. `SESSION_SECRET` is generated automatically if omitted.
+2. The Dashboard defaults to password `vortex5000`; change it in the Dashboard/runtime environment before exposing it publicly. `SESSION_SECRET` is generated automatically if omitted.
 3. Attach a Railway Volume at `/app/data` so saved AppState, settings, and the generated session secret persist between deployments.
 4. Deploy with `npm start`. `railway.json` configures `GET /health` as healthcheck.
 5. Use Railway's HTTPS domain; `NODE_ENV=production` enables secure session cookies.
