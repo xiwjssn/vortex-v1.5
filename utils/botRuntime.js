@@ -98,7 +98,7 @@ function createBotRuntime({ config, logger }) {
       const thread = String(threadID);
       if (repeatingMessages.has(thread)) return { started: false, reason: 'already-running' };
       if (!api || typeof api.sendMessage !== 'function') return { started: false, reason: 'offline' };
-      if (!Array.isArray(messages) || messages.length !== 2 || messages.some(message => !String(message || '').trim()) ||
+      if (!Array.isArray(messages) || ![1, 2].includes(messages.length) || messages.some(message => !String(message || '').trim()) ||
           !Number.isFinite(intervalMs) || intervalMs < 15000 || intervalMs > 86400000) {
         return { started: false, reason: 'invalid-input' };
       }
@@ -122,8 +122,9 @@ function createBotRuntime({ config, logger }) {
         if (task.busy || !api || status !== 'connected' || repeatingMessages.get(thread) !== task) return;
         task.busy = true;
         try {
-          await humanWriter.wrap(api).sendMessage(task.messages[0], thread);
-          await humanWriter.wrap(api).sendMessage(task.messages[1], thread);
+          for (const message of task.messages) {
+            await humanWriter.wrap(api).sendMessage(message, thread);
+          }
         } catch (error) {
           logger.warn('REPEATING_MESSAGE_FAILED', { threadID: thread, error: String(error?.message || error).slice(0, 160) });
         } finally {
