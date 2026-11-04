@@ -123,14 +123,24 @@ module.exports = {
           await send(api, event, `لا توجد مجموعات في قسم «${category.title}» ضمن أول 100 محادثة أعادها Messenger.`);
           return true;
         }
-        // Send short batches so Messenger does not drop a long group list.
-        await send(api, event, `📂 ${category.title} — ${groups.length} مجموعة\nهذه قائمة المجموعات:`);
-        const batchSize = 4;
-        for (let start = 0; start < groups.length; start += batchSize) {
-          const batch = groups.slice(start, start + batchSize);
-          const lines = batch.map((group, offset) => formatGroup(group, start + offset));
-          const isLast = start + batchSize >= groups.length;
-          await send(api, event, lines.join('\n') + (isLast ? '\n\nأرسل رقم المجموعة التي تريد مراجعتها، أو اكتب إلغاء.' : ''));
+        const listMessage =
+          `📂 ${category.title} — ${groups.length} مجموعة\\nهذه قائمة المجموعات:\\n\\n` +
+          groups.map((group, index) => formatGroup(group, index)).join('\\n') +
+          '\\n\\nأرسل رقم المجموعة التي تريد مراجعتها، أو اكتب إلغاء.';
+
+        // In category 2 (OTHER), show every group in one single message.
+        // Keep batching for the other categories to avoid oversized Messenger messages.
+        if (input === '2') {
+          await send(api, event, listMessage);
+        } else {
+          await send(api, event, `📂 ${category.title} — ${groups.length} مجموعة\\nهذه قائمة المجموعات:`);
+          const batchSize = 4;
+          for (let start = 0; start < groups.length; start += batchSize) {
+            const batch = groups.slice(start, start + batchSize);
+            const lines = batch.map((group, offset) => formatGroup(group, start + offset));
+            const isLast = start + batchSize >= groups.length;
+            await send(api, event, lines.join('\\n') + (isLast ? '\\n\\nأرسل رقم المجموعة التي تريد مراجعتها، أو اكتب إلغاء.' : ''));
+          }
         }
         // Enable selection only after the complete list has been sent.
         saveSession(key, { ...state, stage: 'choose-group', category: input, groups });
