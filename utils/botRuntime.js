@@ -72,7 +72,7 @@ function createBotRuntime({ config, logger }) {
     reconnectManager?.stop();
     logger.warn('SESSION_REAUTH_REQUIRED', { reason: 'authentication-or-checkpoint-error' });
   }
-  const nicknameGuard = new NicknameGuard({ getApi: () => api, logger, nickname: '𝑽𝑶𝑹𝑻𝑬𝑿 →' });
+  const nicknameGuard = new NicknameGuard({ getApi: () => api, logger, nickname: '♡⃝ 🎀𝐖𝐀𝐑𝐃𝐀 ୨💅ৎ' });
   const humanWriter = createHumanWriter({
     logger, minIntervalMs: 5000, globalIntervalMs: 2500, duplicateWindowMs: 30000, maxPerMinute: 8, circuitPauseMs: 30 * 60 * 1000, maxConsecutiveFailures: 2,
     onSafetyStop: ({ type, reason }) => {
