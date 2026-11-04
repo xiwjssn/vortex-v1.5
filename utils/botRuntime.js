@@ -134,7 +134,7 @@ function createBotRuntime({ config, logger }) {
       task.timer.unref?.();
       task.inactivityTimer.unref?.();
       repeatingMessages.set(thread, task);
-      logger.info('REPEATING_MESSAGE_STARTED', { threadID: thread, intervalMs, inactivityMs, messageCount: 2 });
+      logger.info('REPEATING_MESSAGE_STARTED', { threadID: thread, intervalMs, inactivityMs, messageCount: task.messages.length });
       return { started: true, intervalMs, inactivityMs };
     },
     noteRepeatingMessageReply(event) {
