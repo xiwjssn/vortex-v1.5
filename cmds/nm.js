@@ -4,124 +4,260 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const CHECK_INTERVAL_MS = 10_000;
+
 let monitorTimer = null;
 let currentApi = null;
 let dataFile = null;
 let protectedNames = {};
+let checking = false;
 
 function loadNames(file) {
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return data && typeof data === 'object' && !Array.isArray(data)
+      ? data
+      : {};
   } catch (error) {
-    if (error.code !== 'ENOENT') console.error('[nm] Could not load saved names:', error.message);
+    if (error.code !== 'ENOENT') {
+      console.error('[nm] Load error:', error.message);
+    }
     return {};
   }
 }
 
 function saveNames() {
-  if (!dataFile) throw new Error('Data directory is not configured');
+  if (!dataFile) {
+    throw new Error('مسار حفظ الأسماء غير محدد');
+  }
+
   fs.mkdirSync(path.dirname(dataFile), { recursive: true });
-  const temp = dataFile + '.tmp';
-  fs.writeFileSync(temp, JSON.stringify(protectedNames, null, 2), { mode: 0o600 });
-  fs.renameSync(temp, dataFile);
+
+  const tempFile = dataFile + '.tmp';
+
+  fs.writeFileSync(
+    tempFile,
+    JSON.stringify(protectedNames, null, 2),
+    'utf8'
+  );
+
+  fs.renameSync(tempFile, dataFile);
 }
 
-function callApi(method, ...args) {
+function apiCall(api, method, ...args) {
   return new Promise((resolve, reject) => {
-    if (!currentApi || typeof currentApi[method] !== 'function') {
+    if (!api || typeof api[method] !== 'function') {
       return reject(new Error('API method unavailable: ' + method));
     }
+
     let settled = false;
-    const done = (error, value) => {
+
+    const finish = (error, result) => {
       if (settled) return;
       settled = true;
-      if (error) reject(error instanceof Error ? error : new Error(String(error)));
-      else resolve(value);
+
+      if (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      } else {
+        resolve(result);
+      }
     };
+
     try {
-      const result = currentApi[method](...args, done);
-      if (result && typeof result.then === 'function') result.then(value => done(null, value), done);
+      const result = api[method](...args, finish);
+
+      if (result && typeof result.then === 'function') {
+        result.then(value => finish(null, value), finish);
+      }
     } catch (error) {
-      done(error);
+      finish(error);
     }
   });
 }
 
 async function checkProtectedNames() {
-  if (!currentApi) return;
-  for (const [threadID, expectedName] of Object.entries(protectedNames)) {
-    try {
-      const info = await callApi('getThreadInfo', threadID);
-      if (info && info.threadName !== expectedName) {
-        await callApi('setTitle', expectedName, threadID);
-        console.log('[nm] Restored protected group name:', threadID);
+  if (!currentApi || checking) return;
+
+  checking = true;
+
+  try {
+    for (const [threadID, expectedName] of Object.entries(protectedNames)) {
+      // قد تكون الحماية أوقفت أثناء الفحص.
+      if (!Object.prototype.hasOwnProperty.call(protectedNames, threadID)) {
+        continue;
       }
-    } catch (error) {
-      console.error('[nm] Could not check group ' + threadID + ':', error.message);
+
+      try {
+        const info = await apiCall(
+          currentApi,
+          'getThreadInfo',
+          threadID
+        );
+
+        if (!info || typeof info.threadName !== 'string') continue;
+
+        if (info.threadName !== expectedName) {
+          // لا نرجع الاسم إذا أُوقفت الحماية أثناء انتظار API.
+          if (!Object.prototype.hasOwnProperty.call(protectedNames, threadID)) {
+            continue;
+          }
+
+          await apiCall(
+            currentApi,
+            'setTitle',
+            expectedName,
+            threadID
+          );
+
+          console.log(
+            `[nm] Restored group ${threadID} name to "${expectedName}"`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `[nm] Failed to protect group ${threadID}:`,
+          error.message
+        );
+      }
     }
+  } finally {
+    checking = false;
   }
 }
 
 function startMonitor(api, config) {
   currentApi = api;
-  const dir = config && config.dataDir ? config.dataDir : path.join(process.cwd(), 'data');
-  const nextDataFile = path.join(dir, 'nm-protected-names.json');
-  if (dataFile !== nextDataFile) {
-    dataFile = nextDataFile;
+
+  const directory = config.dataDir || path.join(process.cwd(), 'data');
+  const nextFile = path.join(directory, 'nm-protected-names.json');
+
+  if (dataFile !== nextFile) {
+    dataFile = nextFile;
     protectedNames = loadNames(dataFile);
   }
+
   if (!monitorTimer) {
     monitorTimer = setInterval(() => {
-      checkProtectedNames().catch(error => console.error('[nm] Monitor failed:', error.message));
+      checkProtectedNames().catch(error => {
+        console.error('[nm] Monitor error:', error.message);
+      });
     }, CHECK_INTERVAL_MS);
-    if (typeof monitorTimer.unref === 'function') monitorTimer.unref();
+
+    if (typeof monitorTimer.unref === 'function') {
+      monitorTimer.unref();
+    }
   }
 }
 
 module.exports = {
   name: 'سحب',
   aliases: [],
-  description: 'تغيير اسم المجموعة وحمايته كل 10 ثوانٍ',
+  description: 'تغيير اسم المجموعة وحمايته أو إيقاف الحماية',
   adminOnly: true,
 
   async execute(api, event) {
     const threadID = String(event.threadID || '');
-    const config = event.config || {};
     const senderID = String(event.senderID || '');
-    const isAuthorized = Boolean(event.isOwner || event.isAdmin) ||
-      (Array.isArray(config.ownerIDs) && config.ownerIDs.map(String).includes(senderID)) ||
-      String(config.ownerID || '') === senderID ||
-      (Array.isArray(config.adminIDs) && config.adminIDs.map(String).includes(senderID));
+    const config = event.config || {};
+
+    const ownerIDs = (config.ownerIDs || [config.ownerID])
+      .filter(Boolean)
+      .map(String);
+
+    const adminIDs = (config.adminIDs || []).map(String);
+
+    const isAuthorized =
+      event.isOwner === true ||
+      event.isAdmin === true ||
+      ownerIDs.includes(senderID) ||
+      adminIDs.includes(senderID);
 
     if (!threadID) {
-      return api.sendMessage('❌ لا يمكن تحديد المجموعة.', event.threadID, event.messageID);
+      return api.sendMessage(
+        '❌ لا يمكن تحديد المجموعة.',
+        event.threadID,
+        event.messageID
+      );
     }
+
     if (!isAuthorized) {
-      return api.sendMessage('⛔ هذا الأمر للمالك والمسؤولين المحددين في الداشبورد فقط.', threadID, event.messageID);
+      return api.sendMessage(
+        '⛔ الأمر خاص بمالك البوت والمسؤولين المحددين في الداشبورد.',
+        threadID,
+        event.messageID
+      );
     }
 
     const args = Array.isArray(event.args) ? event.args : [];
-    const newName = args.join(' ').trim();
+    const input = args.join(' ').trim();
     const prefix = String(config.prefix || '*');
 
-    if (!newName) {
-      return api.sendMessage('استخدم الأمر هكذا: ' + prefix + 'سحب الاسم الجديد', threadID, event.messageID);
-    }
-    if (newName.length > 100) {
-      return api.sendMessage('❌ الاسم طويل جدًا. اختصره وحاول مجددًا.', threadID, event.messageID);
+    if (!input) {
+      return api.sendMessage(
+        `❌ حدد اسمًا جديدًا أو اكتب أمر الإيقاف.\n` +
+        `تغيير الاسم: ${prefix}سحب الاسم الجديد\n` +
+        `إيقاف الحماية: ${prefix}سحب ايقاف`,
+        threadID,
+        event.messageID
+      );
     }
 
     try {
-      currentApi = api;
       startMonitor(api, config);
-      await callApi('setTitle', newName, threadID);
+
+      // إيقاف حماية المجموعة الحالية فقط.
+      if (input.toLowerCase() === 'ايقاف' || input.toLowerCase() === 'إيقاف') {
+        if (!Object.prototype.hasOwnProperty.call(protectedNames, threadID)) {
+          return api.sendMessage(
+            'ℹ️ الحماية غير مفعّلة لهذه المجموعة أصلًا.',
+            threadID,
+            event.messageID
+          );
+        }
+
+        delete protectedNames[threadID];
+        saveNames();
+
+        return api.sendMessage(
+          '🛑 تم إيقاف حماية اسم هذه المجموعة.\n' +
+          'لن يعيد البوت الاسم السابق تلقائيًا.',
+          threadID,
+          event.messageID
+        );
+      }
+
+      const newName = input;
+
+      if (newName.length > 100) {
+        return api.sendMessage(
+          '❌ الاسم طويل جدًا، اختصره وحاول مجددًا.',
+          threadID,
+          event.messageID
+        );
+      }
+
+      // لا نحفظ الاسم إلا بعد نجاح تغييره.
+      await apiCall(api, 'setTitle', newName, threadID);
+
       protectedNames[threadID] = newName;
       saveNames();
-      return api.sendMessage('✅ تم تغيير اسم المجموعة إلى: ' + newName + '\n🛡️ مراقبة الاسم مفعّلة، ويتم فحصه كل 10 ثوانٍ.', threadID, event.messageID);
+
+      return api.sendMessage(
+        `✅ تم تغيير اسم المجموعة إلى: ${newName}\n` +
+        '🛡️ تمت إضافة المجموعة إلى قائمة الحماية.\n' +
+        '⏱️ فحص الاسم كل 10 ثوانٍ.',
+        threadID,
+        event.messageID
+      );
     } catch (error) {
-      console.error('[nm] Command failed:', error.message);
-      return api.sendMessage('❌ تعذر تغيير الاسم. تأكد أن البوت يملك صلاحية تعديل اسم المجموعة. التفاصيل: ' + String(error.message || error).slice(0, 160), threadID, event.messageID);
+      console.error('[nm] Command failed:', error);
+
+      return api.sendMessage(
+        '❌ تعذر تنفيذ الأمر أو حفظ التغييرات.\n' +
+        'تأكد من صلاحيات البوت وإمكانية الكتابة في مجلد البيانات.\n' +
+        `التفاصيل: ${String(error.message || error).slice(0, 150)}`,
+        threadID,
+        event.messageID
+      );
     }
   }
 };
