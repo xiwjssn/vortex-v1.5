@@ -123,12 +123,17 @@ module.exports = {
           await send(api, event, `لا توجد مجموعات في قسم «${category.title}» ضمن أول 100 محادثة أعادها Messenger.`);
           return true;
         }
+        // Send short batches so Messenger does not drop a long group list.
+        await send(api, event, `📂 ${category.title} — ${groups.length} مجموعة\\nهذه قائمة المجموعات:`);
+        const batchSize = 4;
+        for (let start = 0; start < groups.length; start += batchSize) {
+          const batch = groups.slice(start, start + batchSize);
+          const lines = batch.map((group, offset) => formatGroup(group, start + offset));
+          const isLast = start + batchSize >= groups.length;
+          await send(api, event, lines.join('\\n') + (isLast ? '\\n\\nأرسل رقم المجموعة التي تريد مراجعتها، أو اكتب إلغاء.' : ''));
+        }
+        // Enable selection only after the complete list has been sent.
         saveSession(key, { ...state, stage: 'choose-group', category: input, groups });
-        await send(api, event,
-          `📂 ${category.title} — ${groups.length} مجموعة\n\n` +
-          groups.map((group, index) => formatGroup(group, index)).join('\n') +
-          '\n\nأرسل رقم المجموعة التي تريد مراجعتها، أو اكتب إلغاء.'
-        );
       } catch (error) {
         clearSession(key);
         await send(api, event, '❌ تعذّر جلب المجموعات: ' + String(error?.message || error).slice(0, 180));
@@ -164,7 +169,7 @@ module.exports = {
       const category = CATEGORIES[state.category];
       try {
         if (category.action === 'request') {
-          await callApi(api, 'handleMessageRequest', [[selected.threadID], true]);
+          await callApi(api, 'handleMessageRequest', [selected.threadID, true]);
         }
         const result = await api.sendMessage(ROCKET_MESSAGE, selected.threadID);
         if (result?.suppressed) {
