@@ -1,201 +1,320 @@
+'use strict';
+
 const sessions = new Map();
-const SESSION_TTL_MS = 5 * 60 * 1000;
-const MAX_GROUPS_SHOWN = 30;
-const ROCKET_MESSAGE = '𝑹𝑶𝑪𝑲𝑬𝑻 🚀';
+
+const SESSION_TIME = 5 * 60 * 1000;
+const MAX_GROUPS = 30;
+const ROCKET = '𝑹𝑶𝑪𝑲𝑬𝑻 🚀';
+
 const CATEGORIES = {
-  '1': { folder: 'PENDING', title: 'طلبات المراسلة', action: 'request' },
-  '2': { folder: 'OTHER', title: 'غير مهم / قد يكون احتياليًا', action: 'request' },
-  '3': { folder: 'INBOX', title: 'المجموعات المقبولة', action: 'inbox' }
+  '1': { folder: 'PENDING', title: 'طلبات المراسلة', needsAccept: true },
+  '2': { folder: 'OTHER', title: 'غير مهم / قد يكون احتياليًا', needsAccept: true },
+  '3': { folder: 'INBOX', title: 'المجموعات المقبولة', needsAccept: false }
 };
 
-function sessionKey(event) {
+function makeKey(event) {
   return String(event.threadID) + ':' + String(event.senderID || '');
 }
-function clearSession(key) {
+
+function removeSession(key) {
   const current = sessions.get(key);
   if (current?.timer) clearTimeout(current.timer);
   sessions.delete(key);
 }
-function saveSession(key, value) {
-  clearSession(key);
-  value.expiresAt = Date.now() + SESSION_TTL_MS;
-  value.timer = setTimeout(() => sessions.delete(key), SESSION_TTL_MS);
-  value.timer.unref?.();
-  sessions.set(key, value);
+
+function putSession(key, data) {
+  removeSession(key);
+  const session = { ...data, expires: Date.now() + SESSION_TIME };
+  session.timer = setTimeout(() => sessions.delete(key), SESSION_TIME);
+  session.timer.unref?.();
+  sessions.set(key, session);
 }
-function getSession(key) {
-  const value = sessions.get(key);
-  if (!value) return null;
-  if (value.expiresAt <= Date.now()) {
-    clearSession(key);
+
+function readSession(key) {
+  const session = sessions.get(key);
+  if (!session) return null;
+  if (Date.now() >= session.expires) {
+    removeSession(key);
     return null;
   }
-  return value;
+  return session;
 }
-function callApi(api, method, args = []) {
+
+function apiCall(api, method, args = [], timeout = 15000) {
   return new Promise((resolve, reject) => {
     if (typeof api?.[method] !== 'function') {
-      reject(new Error('النسخة المثبتة لا تدعم ' + method));
+      reject(new Error('API method not available: ' + method));
       return;
     }
-    let settled = false;
-    const done = (error, result) => {
-      if (settled) return;
-      settled = true;
-      error ? reject(error) : resolve(result);
-    };
+
+    let finished = false;
+    const timer = setTimeout(() => finish(new Error('انتهت مهلة الاتصال بـ ' + method)), timeout);
+
+    function finish(error, result) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(result);
+    }
+
     try {
-      const result = api[method](...args, done);
-      if (result && typeof result.then === 'function') result.then(value => done(null, value), done);
-      else if (result !== undefined && api[method].length <= args.length) done(null, result);
-    } catch (error) { done(error); }
+      const result = api[method](...args, finish);
+      if (result && typeof result.then === 'function') {
+        result.then(value => finish(null, value), error => finish(error));
+      } else if (result !== undefined && api[method].length <= args.length) {
+        finish(null, result);
+      }
+    } catch (error) {
+      finish(error);
+    }
   });
 }
-function isGroupThread(thread) {
-  return !!thread && (thread.isGroup === true || thread.isGroup === 1 || thread.isGroup === 'true');
-}
-function formatGroup(thread, index) {
-  const name = String(thread.name || 'مجموعة بلا اسم').replace(/[\r\n]+/g, ' ').slice(0, 90);
-  return `${index + 1}. ${name} — ID: ${thread.threadID}`;
-}
-async function fetchGroups(api, folder) {
-  const threads = await callApi(api, 'getThreadList', [100, null, [folder]]);
-  if (!Array.isArray(threads)) throw new Error('لم تُرجع قائمة المحادثات بشكل صحيح.');
-  const seen = new Set();
-  return threads.filter(thread => {
-    if (!isGroupThread(thread) || !thread.threadID) return false;
-    const id = String(thread.threadID);
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  }).slice(0, MAX_GROUPS_SHOWN).map(thread => ({
-    threadID: String(thread.threadID),
-    name: String(thread.name || 'مجموعة بلا اسم').replace(/[\r\n]+/g, ' ').slice(0, 90),
-    folder: thread.folder || folder
-  }));
-}
+
 async function send(api, event, message) {
-  return api.sendMessage(message, event.threadID, event.messageID);
+  return api.sendMessage(String(message), event.threadID, event.messageID);
 }
+
+function isGroup(thread) {
+  if (!thread || !thread.threadID) return false;
+
+  if (thread.isGroup === true || thread.isGroup === 1 || thread.isGroup === 'true') {
+    return true;
+  }
+
+  if (thread.threadType === 'GROUP' || thread.threadType === 'group') {
+    return true;
+  }
+
+  if (Array.isArray(thread.participantIDs) && thread.participantIDs.length > 2) {
+    return true;
+  }
+
+  if (Number(thread.participantCount) > 2 || Number(thread.userInfo?.length) > 2) {
+    return true;
+  }
+
+  return false;
+}
+
+async function loadGroups(api, folder) {
+  const result = await apiCall(api, 'getThreadList', [100, null, [folder]]);
+
+  if (!Array.isArray(result)) {
+    throw new Error('Messenger لم يُرجع قائمة المحادثات.');
+  }
+
+  const unique = new Map();
+
+  for (const thread of result) {
+    if (!thread?.threadID || !isGroup(thread)) continue;
+
+    const id = String(thread.threadID);
+    if (unique.has(id)) continue;
+
+    unique.set(id, {
+      id,
+      name: String(thread.name || 'مجموعة بلا اسم')
+        .replace(/[\r\n]+/g, ' ')
+        .trim()
+        .slice(0, 75)
+    });
+  }
+
+  return [...unique.values()].slice(0, MAX_GROUPS);
+}
+
+function formatGroups(groups) {
+  return groups.map((group, index) =>
+    (index + 1) + '. ' + group.name + '\nID: ' + group.id
+  ).join('\n\n');
+}
+
+function categoryMenu() {
+  return [
+    '🗂️ VORTEX | إدارة المجموعات',
+    '',
+    'اختر القسم بإرسال رقمه:',
+    '',
+    '1️⃣ طلبات المراسلة',
+    '2️⃣ غير مهم / قد يكون احتياليًا',
+    '3️⃣ المجموعات المقبولة',
+    '',
+    'تنتهي الجلسة بعد 5 دقائق.',
+    'اكتب إلغاء لإيقاف العملية.'
+  ].join('\n');
+}
+
 module.exports = {
   name: 'groups',
   aliases: ['غروبات', 'المجموعات'],
-  description: 'إدارة مجموعات طلبات المراسلة والمهمَل والمقبول (للمالك فقط)',
+  description: 'إدارة مجموعات Messenger',
   adminOnly: true,
-  _test: { CATEGORIES, isGroupThread, fetchGroups, sessionKey, saveSession, clearSession, getSession, callApi },
+
   async execute(api, event) {
     if (!event.isOwner) {
-      return send(api, event, '⛔ أمر الغروبات متاح للمالك فقط؛ لأنه قد يقبل طلبات مراسلة ويرسل رسالة إلى مجموعة.');
+      return send(api, event, '⛔ هذا الأمر متاح للمالك فقط.');
     }
-    const key = sessionKey(event);
-    saveSession(key, { stage: 'category', senderID: String(event.senderID), threadID: String(event.threadID) });
-    return send(api, event,
-      '🗂️ VORTEX | إدارة الغروبات\n\n' +
-      'اختر القسم بإرسال رقمه في نفس المحادثة:\n' +
-      '1️⃣ طلبات المراسلة\n' +
-      '2️⃣ غير مهم / قد يكون احتياليًا\n' +
-      '3️⃣ المجموعات المقبولة\n\n' +
-      'تنتهي الجلسة بعد 5 دقائق. اكتب إلغاء لإيقاف العملية.'
-    );
+
+    const key = makeKey(event);
+    putSession(key, {
+      stage: 'category',
+      owner: String(event.senderID),
+      thread: String(event.threadID)
+    });
+
+    return send(api, event, categoryMenu());
   },
+
   async handleReply(api, event) {
-    const key = sessionKey(event);
-    const state = getSession(key);
-    if (!state) return false;
-    if (String(event.senderID || '') !== state.senderID || String(event.threadID) !== state.threadID) return false;
+    const key = makeKey(event);
+    const session = readSession(key);
+    if (!session) return false;
+
+    if (String(event.senderID || '') !== session.owner) return false;
+    if (String(event.threadID) !== session.thread) return false;
+
     const input = String(event.body || '').trim();
     if (!input) return false;
+
     if (/^(إلغاء|الغاء|cancel)$/i.test(input)) {
-      clearSession(key);
-      await send(api, event, 'تم إلغاء العملية.');
+      removeSession(key);
+      await send(api, event, '✅ تم إلغاء العملية.');
       return true;
     }
-    if (state.stage === 'category') {
+
+    if (session.stage === 'category') {
       const category = CATEGORIES[input];
+
       if (!category) {
-        await send(api, event, 'اختر رقمًا صحيحًا: 1 أو 2 أو 3، أو اكتب إلغاء.');
+        await send(api, event, '❌ اختر 1 أو 2 أو 3، أو اكتب إلغاء.');
         return true;
       }
+
       try {
-        const groups = await fetchGroups(api, category.folder);
+        const groups = await loadGroups(api, category.folder);
+
         if (!groups.length) {
-          clearSession(key);
-          await send(api, event, `لا توجد مجموعات في قسم «${category.title}» ضمن أول 100 محادثة أعادها Messenger.`);
+          removeSession(key);
+          await send(api, event, 'لا توجد مجموعات في قسم «' + category.title + '».');
           return true;
         }
-        const listMessage =
-          `📂 ${category.title} — ${groups.length} مجموعة\\nهذه قائمة المجموعات:\\n\\n` +
-          groups.map((group, index) => formatGroup(group, index)).join('\\n') +
-          '\\n\\nأرسل رقم المجموعة التي تريد مراجعتها، أو اكتب إلغاء.';
 
-        // In category 2 (OTHER), show every group in one single message.
-        // Keep batching for the other categories to avoid oversized Messenger messages.
-        if (input === '2') {
-          await send(api, event, listMessage);
-        } else {
-          await send(api, event, `📂 ${category.title} — ${groups.length} مجموعة\\nهذه قائمة المجموعات:`);
-          const batchSize = 4;
-          for (let start = 0; start < groups.length; start += batchSize) {
-            const batch = groups.slice(start, start + batchSize);
-            const lines = batch.map((group, offset) => formatGroup(group, start + offset));
-            const isLast = start + batchSize >= groups.length;
-            await send(api, event, lines.join('\\n') + (isLast ? '\\n\\nأرسل رقم المجموعة التي تريد مراجعتها، أو اكتب إلغاء.' : ''));
-          }
+        putSession(key, {
+          ...session,
+          stage: 'select',
+          category: input,
+          groups
+        });
+
+        const list =
+          '📂 ' + category.title + '\n' +
+          'عدد المجموعات: ' + groups.length + '\n\n' +
+          formatGroups(groups) +
+          '\n\nأرسل رقم المجموعة التي تريد مراجعتها.\nاكتب إلغاء لإيقاف العملية.';
+
+        // قسم OTHER يعرض القائمة كاملة في رسالة واحدة.
+        // نرسل رسالة واحدة في جميع الأقسام متى كانت ضمن حد Messenger.
+        if (list.length > 1900) {
+          removeSession(key);
+          await send(api, event,
+            '⚠️ القائمة تحتوي على ' + groups.length +
+            ' مجموعة وطولها ' + list.length +
+            ' حرفًا، وقد تتجاوز حد رسالة Messenger الواحدة. لم أرسل قائمة ناقصة.'
+          );
+          return true;
         }
-        // Enable selection only after the complete list has been sent.
-        saveSession(key, { ...state, stage: 'choose-group', category: input, groups });
+
+        await send(api, event, list);
       } catch (error) {
-        clearSession(key);
-        await send(api, event, '❌ تعذّر جلب المجموعات: ' + String(error?.message || error).slice(0, 180));
+        removeSession(key);
+        await send(api, event,
+          '❌ فشل جلب المجموعات:\n' +
+          String(error?.message || error).slice(0, 250)
+        );
       }
+
       return true;
     }
-    if (state.stage === 'choose-group') {
+
+    if (session.stage === 'select') {
+      if (!/^\d+$/.test(input)) {
+        await send(api, event, 'أرسل رقمًا من 1 إلى ' + session.groups.length + '.');
+        return true;
+      }
+
       const number = Number(input);
-      if (!/^\d+$/.test(input) || number < 1 || number > state.groups.length) {
-        await send(api, event, `أرسل رقمًا من 1 إلى ${state.groups.length}، أو اكتب إلغاء.`);
+      if (number < 1 || number > session.groups.length) {
+        await send(api, event, 'الرقم غير صحيح. اختر من 1 إلى ' + session.groups.length + '.');
         return true;
       }
-      const selected = state.groups[number - 1];
-      saveSession(key, { ...state, stage: 'confirm', selected });
-      await send(api, event,
-        `هل تريد قبول/تفعيل هذه المجموعة؟\n«${selected.name}»\nID: ${selected.threadID}\n\n` +
-        '1️⃣ نعم — قبول الطلب إن كان معلّقًا، ثم إرسال 𝑹𝑶𝑪𝑲𝑬𝑻 🚀\n' +
-        '2️⃣ لا — إلغاء دون إرسال شيء.'
-      );
+
+      const selected = session.groups[number - 1];
+
+      putSession(key, { ...session, stage: 'confirm', selected });
+
+      await send(api, event, [
+        'هل تريد تنفيذ العملية على هذه المجموعة؟',
+        '',
+        '📌 الاسم: ' + selected.name,
+        '🆔 ID: ' + selected.id,
+        '',
+        '1️⃣ نعم — تأكيد',
+        '2️⃣ لا — إلغاء'
+      ].join('\n'));
+
       return true;
     }
-    if (state.stage === 'confirm') {
+
+    if (session.stage === 'confirm') {
       if (input === '2') {
-        clearSession(key);
-        await send(api, event, 'تم الإلغاء. لم يتم قبول المجموعة ولم تُرسل رسالة إليها.');
+        removeSession(key);
+        await send(api, event, 'تم الإلغاء. لم يتم إرسال أي رسالة للمجموعة.');
         return true;
       }
+
       if (input !== '1') {
         await send(api, event, 'أرسل 1 للتأكيد أو 2 للإلغاء.');
         return true;
       }
-      const selected = state.selected;
-      const category = CATEGORIES[state.category];
+
+      const selected = session.selected;
+      const category = CATEGORIES[session.category];
+
       try {
-        if (category.action === 'request') {
-          await callApi(api, 'handleMessageRequest', [selected.threadID, true]);
+        if (category.needsAccept) {
+          await apiCall(api, 'handleMessageRequest', [selected.id, true]);
         }
-        const result = await api.sendMessage(ROCKET_MESSAGE, selected.threadID);
+
+        const result = await api.sendMessage(ROCKET, selected.id);
+
         if (result?.suppressed) {
-          clearSession(key);
-          await send(api, event, '⚠️ تم تنفيذ خطوة القبول إن لزم، لكن نظام الحماية منع الإرسال: ' + String(result.reason || 'suppressed'));
+          removeSession(key);
+          await send(api, event,
+            '⚠️ تم تنفيذ خطوة القبول إن لزم، لكن نظام الحماية منع الإرسال: ' +
+            String(result.reason || 'suppressed')
+          );
           return true;
         }
-        clearSession(key);
-        await send(api, event, `✅ ${category.action === 'request' ? 'تم قبول طلب المحادثة' : 'تم تأكيد المجموعة المقبولة'} «${selected.name}»، وأُرسلت رسالة 𝑹𝑶𝑪𝑲𝑬𝑻 🚀 إليها.`);
+
+        removeSession(key);
+        await send(api, event,
+          '✅ تمت العملية على المجموعة:\n' + selected.name +
+          '\n\nتم إرسال ' + ROCKET
+        );
       } catch (error) {
-        clearSession(key);
-        await send(api, event, '❌ تعذّر إكمال العملية: ' + String(error?.message || error).slice(0, 180) + '\nتحقق من حالة المجموعة قبل إعادة المحاولة.');
+        removeSession(key);
+        await send(api, event,
+          '❌ فشلت العملية:\n' +
+          String(error?.message || error).slice(0, 250) +
+          '\n\nتحقق من حالة المجموعة قبل إعادة المحاولة.'
+        );
       }
+
       return true;
     }
-    clearSession(key);
+
+    removeSession(key);
     return false;
   }
 };
