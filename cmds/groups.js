@@ -124,13 +124,13 @@ module.exports = {
           return true;
         }
         // Send short batches so Messenger does not drop a long group list.
-        await send(api, event, `📂 ${category.title} — ${groups.length} مجموعة\\nهذه قائمة المجموعات:`);
+        await send(api, event, `📂 ${category.title} — ${groups.length} مجموعة\nهذه قائمة المجموعات:`);
         const batchSize = 4;
         for (let start = 0; start < groups.length; start += batchSize) {
           const batch = groups.slice(start, start + batchSize);
           const lines = batch.map((group, offset) => formatGroup(group, start + offset));
           const isLast = start + batchSize >= groups.length;
-          await send(api, event, lines.join('\\n') + (isLast ? '\\n\\nأرسل رقم المجموعة التي تريد مراجعتها، أو اكتب إلغاء.' : ''));
+          await send(api, event, lines.join('\n') + (isLast ? '\n\nأرسل رقم المجموعة التي تريد مراجعتها، أو اكتب إلغاء.' : ''));
         }
         // Enable selection only after the complete list has been sent.
         saveSession(key, { ...state, stage: 'choose-group', category: input, groups });
