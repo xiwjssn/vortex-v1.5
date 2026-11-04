@@ -1,6 +1,6 @@
 'use strict';
 
-const DEFAULT_NICKNAME = '𝑽𝑶𝑹𝑻𝑬𝑿 →';
+const DEFAULT_NICKNAME = '♡⃝ 🎀𝐖𝐀𝐑𝐃𝐀 ୨💅ৎ';
 
 function callWithCallback(api, method, args, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
