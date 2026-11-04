@@ -1,6 +1,6 @@
 'use strict';
 
-const DEFAULT_NICKNAME = '♡⃝ 🎀𝐖𝐀𝐑𝐃𝐀 ୨💅ৎ';
+const DEFAULT_NICKNAME = '𝚅𝚯⃫𝐑⃕𝚃⃓𝚵𝐗;
 
 function callWithCallback(api, method, args, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
