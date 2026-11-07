@@ -8,6 +8,7 @@ const { validateAppState } = require('../utils/appState');
 const { atomicWrite } = require('../utils/atomicFile');
 const { validateConfig } = require('../utils/config');
 const roleLists = require('../utils/roleLists');
+const { FileSessionStore } = require('../utils/sessionStore');
 
 async function startDashboard({ config, logger, runtime, accounts = {} }) {
   if (!config.sessionSecret || config.sessionSecret.length < 32) {
@@ -24,7 +25,9 @@ async function startDashboard({ config, logger, runtime, accounts = {} }) {
     fontSrc: ["'self'", 'https://fonts.gstatic.com'], imgSrc: ["'self'", 'data:']
   } } }));
   app.use(express.json({ limit: '256kb' }));
+  const dashboardSessionStore = new FileSessionStore({ directory: path.join(config.dataDir, 'dashboard-sessions'), logger });
   app.use(session({
+    store: dashboardSessionStore,
     name: 'vortex.sid', secret: config.sessionSecret, resave: false, saveUninitialized: false, proxy: process.env.NODE_ENV === 'production',
     cookie: { httpOnly: true, sameSite: 'strict', secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 8 }
   }));
