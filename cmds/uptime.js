@@ -26,6 +26,7 @@ function formatLocationTime(timeZone) {
 }
 
 module.exports = {
+  formatUptime,
   name: 'uptime',
   aliases: ['up', 'مدة', 'مدة_التشغيل'],
   description: 'معلومات VORTEX ومدة التشغيل وتوقيت ليبيا والجزائر',
