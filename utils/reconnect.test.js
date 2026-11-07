@@ -4,7 +4,29 @@ const { ReconnectManager } = require('./reconnect');
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-test('reconnect manager stops after the configured retry budget', async () => {
+test('default reconnect policy keeps retrying until connection succeeds', async () => {
+  let calls = 0;
+  const manager = new ReconnectManager({
+    connect: async () => {
+      calls++;
+      if (calls < 5) throw new Error('temporary network failure');
+      return { status: 'connected' };
+    },
+    logger: { warn: () => {}, error: () => {} },
+    baseMs: 100,
+    maxMs: 100,
+    random: () => 0.5
+  });
+  manager.start();
+  manager.schedule();
+  await wait(650);
+  assert.equal(calls, 5);
+  assert.equal(manager.stopped, false);
+  assert.equal(manager.attempts, 0);
+  manager.stop();
+});
+
+test('an explicitly configured retry budget is still respected', async () => {
   let calls = 0;
   const errors = [];
   const manager = new ReconnectManager({
