@@ -69,7 +69,19 @@ async function startDashboard({ config, logger, runtime, accounts = {} }) {
     next();
   };
 
-  app.get('/health', (req, res) => res.json({ status: 'ok', bot: 'VORTEX' }));
+  app.get('/health', (req, res) => {
+    const primary = runtime.getState();
+    const secondary = accounts.secondary?.getState?.() || null;
+    res.json({
+      status: 'ok',
+      bot: 'VORTEX',
+      botConnected: !!(primary.connected || secondary?.connected),
+      accounts: {
+        primary: { configured: !!primary.appStateConfigured, connected: !!primary.connected, sessionHealth: primary.sessionHealth },
+        secondary: secondary ? { configured: !!secondary.appStateConfigured, connected: !!secondary.connected, sessionHealth: secondary.sessionHealth } : null
+      }
+    });
+  });
   app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
   app.post('/api/login', loginLimiter, (req, res) => {
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
