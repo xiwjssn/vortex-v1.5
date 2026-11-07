@@ -43,3 +43,17 @@ test('does not rename the bot in a one-to-one conversation', async () => {
   await guard.handle({ type: 'message', body: 'hello', threadID: 'direct-1' });
   assert.equal(changes, 0);
 });
+
+test('bounds nickname tracking and removes stale thread entries', async () => {
+  const api = {
+    getCurrentUserID: () => 'bot',
+    getThreadInfo: (_threadID, callback) => callback(null, { participantIDs: ['bot', 'user'], nicknames: {} })
+  };
+  const guard = new NicknameGuard({ getApi: () => api, logger: { info() {}, warn() {} }, maxTrackedThreads: 100 });
+  const old = Date.now() - 10 * 60 * 1000;
+  guard.checkedAt.set('stale-thread', old);
+  for (let i = 0; i < 150; i++) guard.checkedAt.set('thread-' + i, Date.now());
+  await guard.ensureThread('new-thread', api, true);
+  assert.equal(guard.checkedAt.has('stale-thread'), false);
+  assert.ok(guard.checkedAt.size <= 100);
+});
