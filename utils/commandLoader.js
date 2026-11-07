@@ -3,7 +3,7 @@ function loadCommands(dir, logger=console) {
   const safeDir = path.resolve(dir); const commands = new Map(); const errors=[];
   fs.mkdirSync(safeDir,{recursive:true});
   for (const entry of fs.readdirSync(safeDir,{withFileTypes:true})) {
-    if (!entry.isFile() || !entry.name.endsWith('.js') || entry.name.startsWith('.')) continue;
+    if (!entry.isFile() || !entry.name.endsWith('.js') || entry.name.endsWith('.test.js') || entry.name.startsWith('.')) continue;
     const file = path.resolve(safeDir, entry.name);
     if (path.dirname(file)!==safeDir) { errors.push({file:entry.name,error:'Invalid path'}); continue; }
     try {
