@@ -28,11 +28,12 @@ function callWithCallback(api, method, args, timeoutMs = 10000) {
 }
 
 class NicknameGuard {
-  constructor({ getApi, logger = console, nickname = DEFAULT_NICKNAME, cooldownMs = 30000 } = {}) {
+  constructor({ getApi, logger = console, nickname = DEFAULT_NICKNAME, cooldownMs = 30000, maxTrackedThreads = 2000 } = {}) {
     this.getApi = getApi;
     this.logger = logger;
     this.nickname = nickname;
     this.cooldownMs = cooldownMs;
+    this.maxTrackedThreads = Math.max(100, Math.floor(maxTrackedThreads));
     this.checkedAt = new Map();
     this.inFlight = new Map();
   }
@@ -76,14 +77,29 @@ class NicknameGuard {
     }
   }
 
+  pruneCheckedAt(now = Date.now()) {
+    const maxAgeMs = Math.max(this.cooldownMs * 4, 5 * 60 * 1000);
+    for (const [id, checkedAt] of this.checkedAt) {
+      if (now - checkedAt > maxAgeMs) this.checkedAt.delete(id);
+    }
+    if (this.checkedAt.size > this.maxTrackedThreads) {
+      const oldest = [...this.checkedAt.entries()]
+        .sort((a, b) => a[1] - b[1])
+        .slice(0, this.checkedAt.size - this.maxTrackedThreads);
+      for (const [id] of oldest) this.checkedAt.delete(id);
+    }
+  }
+
   async ensureThread(threadID, api, force) {
     const id = String(threadID);
     const now = Date.now();
+    this.pruneCheckedAt(now);
     if (!force && now - (this.checkedAt.get(id) || 0) < this.cooldownMs) return;
     if (this.inFlight.has(id)) return this.inFlight.get(id);
 
     const task = (async () => {
       this.checkedAt.set(id, Date.now());
+      this.pruneCheckedAt();
       const info = await callWithCallback(api, 'getThreadInfo', [id]);
       const participants = Array.isArray(info?.participantIDs)
         ? info.participantIDs.map(String)
