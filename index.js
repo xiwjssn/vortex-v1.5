@@ -1,37 +1,21 @@
 if (!process.env.NODE_ENV) process.env.NODE_ENV = process.env.SERVER_PORT ? 'production' : 'development';
-const fs = require('node:fs/promises');
 const path = require('node:path');
 const { startDashboard } = require('./dashboard/server');
 const { createBotRuntime } = require('./utils/botRuntime');
 const { createLogger } = require('./utils/logger');
 const { loadConfig } = require('./utils/config');
+const { preparePersistentDataDirectory } = require('./utils/persistentData');
 
 let appLogger = null;
 
-async function preparePersistentDataDirectory() {
-  const configured = process.env.DATA_DIR;
-  if (!configured) return;
-  const source = path.join(__dirname, 'data');
-  const destination = path.resolve(configured);
-  if (destination === path.resolve(source)) return;
-  await fs.mkdir(destination, { recursive: true, mode: 0o700 });
-  try {
-    // Migrate existing AppState, settings and session secrets on the first
-    // deployment with a Railway Volume. Existing volume files always win.
-    await fs.cp(source, destination, {
-      recursive: true,
-      force: false,
-      errorOnExist: false
-    });
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-  await fs.chmod(destination, 0o700);
+async function prepareDataDirectory() {
+  if (!process.env.DATA_DIR) return;
+  await preparePersistentDataDirectory(path.join(__dirname, 'data'), process.env.DATA_DIR);
 }
 
 async function main() {
   appLogger = createLogger();
-  await preparePersistentDataDirectory();
+  await prepareDataDirectory();
   const config = loadConfig();
   const secondaryDataDir = path.join(config.dataDir, 'account-2');
   config.peerAppStateFiles = [path.join(secondaryDataDir, 'appstate.json')];
