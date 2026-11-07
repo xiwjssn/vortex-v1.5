@@ -512,7 +512,7 @@ function createBotRuntime({ config, logger }) {
       });
       reconnectManager.start();
       manualDisconnect = false;
-      try { await runtime.connect(); } catch { if (!sessionCleared) reconnectManager.schedule(); }
+      try { await runtime.connect(); } catch { if (appStatePresent && !sessionCleared && !requiresSessionUpdate) reconnectManager.schedule(); }
     },
     async listMessengerThreads(folder = 'inbox') {
       if (!api || status !== 'connected') throw new Error('Connect the account with a valid AppState first.');
