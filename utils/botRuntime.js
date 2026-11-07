@@ -74,7 +74,7 @@ function createBotRuntime({ config, logger }) {
   }
   const nicknameGuard = new NicknameGuard({ getApi: () => api, logger, nickname: '𝚅𝚯⃫𝐑⃕𝚃⃓𝚵𝐗' });
   const humanWriter = createHumanWriter({
-    logger, minIntervalMs: 5000, globalIntervalMs: 2500, duplicateWindowMs: 30000, maxPerMinute: 8, circuitPauseMs: 30 * 60 * 1000, maxConsecutiveFailures: 2,
+    logger, minIntervalMs: 6000, globalIntervalMs: 4000, duplicateWindowMs: 60000, maxPerMinute: 5, circuitPauseMs: 60 * 60 * 1000, maxConsecutiveFailures: 2,
     onSafetyStop: ({ type, reason }) => {
       clearRepeatingMessages();
       logger.warn('OUTBOUND_AUTOMATION_STOPPED', { type, reason });
