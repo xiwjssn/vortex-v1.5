@@ -57,3 +57,21 @@ test('bounds nickname tracking and removes stale thread entries', async () => {
   assert.equal(guard.checkedAt.has('stale-thread'), false);
   assert.ok(guard.checkedAt.size <= 100);
 });
+
+test('limits concurrent thread metadata requests', async () => {
+  let active = 0;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const api = {
+    getCurrentUserID: () => 'bot',
+    getThreadInfo: async () => { active++; await gate; active--; return { participantIDs: ['bot', 'a', 'b'], nicknames: { bot: DEFAULT_NICKNAME } }; }
+  };
+  const guard = new NicknameGuard({ getApi: () => api, maxConcurrent: 2, logger: { info() {}, warn() {} } });
+  const first = guard.handle({ type: 'message', body: 'x', threadID: 'g1' });
+  const second = guard.handle({ type: 'message', body: 'x', threadID: 'g2' });
+  await new Promise(resolve => setImmediate(resolve));
+  await guard.handle({ type: 'message', body: 'x', threadID: 'g3' });
+  assert.equal(guard.inFlight.size, 2);
+  release();
+  await Promise.all([first, second]);
+});
