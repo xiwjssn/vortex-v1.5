@@ -8,6 +8,7 @@ const { AppStateRefreshManager } = require('./appStateRefresh');
 const { NicknameGuard } = require('./nicknameGuard');
 const { createHumanWriter } = require('./humanWriter');
 const { isAuthorizedSender } = require('./accessControl');
+const { isSessionAuthError } = require('./sessionErrors');
 
 function createBotRuntime({ config, logger }) {
   const cmdsDir = path.join(__dirname, '..', 'cmds');
@@ -48,10 +49,6 @@ function createBotRuntime({ config, logger }) {
         throw new Error('This Facebook account is already assigned to the other VORTEX account panel. Use a different account AppState.');
       }
     }
-  }
-  function isSessionAuthError(value) {
-    const message = String(value?.message || value || '').toLowerCase();
-    return /checkpoint|login approval|login required|invalid appstate|invalid cookie|cookie.{0,20}(expired|invalid)|session.{0,20}(expired|invalid)|not logged in|authentication failed|account disabled|two.factor|\b401\b|\b403\b|please log in/.test(message);
   }
   async function initializeAppStateRefreshManager() {
     if (appStateRefreshManager) return;
@@ -414,9 +411,10 @@ function createBotRuntime({ config, logger }) {
           return;
         }
         seenCommandMessages.set(dedupeKey, now);
-        if (seenCommandMessages.size > 2000) {
-          const oldest = [...seenCommandMessages.entries()].sort((a, b) => a[1] - b[1]).slice(0, 500);
-          for (const [key] of oldest) seenCommandMessages.delete(key);
+        while (seenCommandMessages.size > 2000) {
+          const oldestKey = seenCommandMessages.keys().next().value;
+          if (oldestKey === undefined) break;
+          seenCommandMessages.delete(oldestKey);
         }
       }
       // Give every recognized command a natural typing pause before it responds.
