@@ -28,12 +28,13 @@ function callWithCallback(api, method, args, timeoutMs = 10000) {
 }
 
 class NicknameGuard {
-  constructor({ getApi, logger = console, nickname = DEFAULT_NICKNAME, cooldownMs = 30000, maxTrackedThreads = 2000 } = {}) {
+  constructor({ getApi, logger = console, nickname = DEFAULT_NICKNAME, cooldownMs = 30000, maxTrackedThreads = 2000, maxConcurrent = 8 } = {}) {
     this.getApi = getApi;
     this.logger = logger;
     this.nickname = nickname;
     this.cooldownMs = cooldownMs;
     this.maxTrackedThreads = Math.max(100, Math.floor(maxTrackedThreads));
+    this.maxConcurrent = Math.max(1, Math.floor(maxConcurrent));
     this.checkedAt = new Map();
     this.inFlight = new Map();
   }
@@ -96,6 +97,8 @@ class NicknameGuard {
     this.pruneCheckedAt(now);
     if (!force && now - (this.checkedAt.get(id) || 0) < this.cooldownMs) return;
     if (this.inFlight.has(id)) return this.inFlight.get(id);
+    // Avoid opening an unbounded number of FCA metadata requests during busy periods.
+    if (this.inFlight.size >= this.maxConcurrent) return false;
 
     const task = (async () => {
       this.checkedAt.set(id, Date.now());
