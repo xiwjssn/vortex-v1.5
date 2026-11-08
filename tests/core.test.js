@@ -7,3 +7,11 @@ test('logger redacts sensitive keys',()=>{assert.equal(sanitize({token:'abc',ok:
 test('Reconnect manager schedules once and can be stopped',()=>{let calls=0;const r=new ReconnectManager({connect:async()=>{calls++;throw Error('offline')},baseMs:10,maxMs:10,random:()=>0});r.start();assert.equal(r.schedule(),true);assert.equal(r.schedule(),false);r.stop();assert.equal(r.timer,null);assert.equal(calls,0);});
 
 test('command loader ignores test files in the commands directory',()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'vortex-test-files-'));fs.writeFileSync(path.join(dir,'real.js'),"module.exports={name:'real',aliases:[],execute(){}};");fs.writeFileSync(path.join(dir,'real.test.js'),"module.exports={name:'not-a-command',aliases:[],execute(){}};");const result=loadCommands(dir,{error(){}});assert.equal(result.commands.has('real'),true);assert.equal(result.commands.has('not-a-command'),false);assert.equal(result.errors.length,0);fs.rmSync(dir,{recursive:true,force:true});});
+
+const { isSessionAuthError } = require('../utils/sessionErrors');
+test('Facebook login-blocked and invalid-session errors require manual session attention',()=>{
+  assert.equal(isSessionAuthError('login_blocked'),true);
+  assert.equal(isSessionAuthError('USER_ID=0'),true);
+  assert.equal(isSessionAuthError('checkpoint required'),true);
+  assert.equal(isSessionAuthError('temporary network timeout'),false);
+});
